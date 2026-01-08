@@ -1,4 +1,8 @@
-/dataset/
 /result/
 /weight/
 /runs/
+
+/dataset/*
+!/dataset/__init__.py
+!/dataset/preprocess.py
+!/dataset/load_data.py
