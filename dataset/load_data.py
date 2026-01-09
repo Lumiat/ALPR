@@ -71,6 +71,15 @@ class LPRDataLoader(Dataset):
         return Image, label, len(label)
 
     def transform(self, img):
+        try:
+            # 转换到 YUV 颜色空间，只对亮度通道 Y 做均衡化
+            img_yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            img_yuv[:,:,0] = clahe.apply(img_yuv[:,:,0])
+            img = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)
+        except:
+            pass # 防止极端情况报错
+    
         img = img.astype('float32')
         img -= 127.5
         img *= 0.0078125
