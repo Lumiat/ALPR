@@ -3,6 +3,7 @@ import shutil
 import yaml
 import pandas as pd
 import matplotlib.pyplot as plt
+import argparse
 from ultralytics import YOLO
 
 # ================= 配置区域 =================
@@ -15,11 +16,29 @@ RESULT_DIR = os.path.join(PROJECT_ROOT, "result")
 # 权重保存路径
 WEIGHT_DIR = os.path.join(PROJECT_ROOT, "weight")
 
-# 训练超参数
-EPOCHS = 50           
-BATCH_SIZE = 16       # 显存够大可改大
-IMG_SIZE = 640        
 MODEL_NAME = 'yolov8n-pose.pt' 
+
+def parse_args():
+    """
+    解析命令行参数
+    """
+    parser = argparse.ArgumentParser(description='YOLO Pose训练脚本 - 车牌四点检测')
+    
+    # 训练超参数
+    parser.add_argument('--epochs', type=int, default=50,
+                        help='训练轮数 (默认: 50)')
+    parser.add_argument('--batch-size', type=int, default=16,
+                        help='批次大小 (默认: 16)')
+    parser.add_argument('--img-size', type=int, default=640,
+                        help='输入图像尺寸 (默认: 640)')
+    
+    # 可选参数
+    parser.add_argument('--device', type=int, default=0,
+                        help='GPU设备编号 (默认: 0, 使用cpu则设为-1)')
+    parser.add_argument('--model', type=str, default='yolov8n-pose.pt',
+                        help='预训练模型名称 (默认: yolov8n-pose.pt)')
+    
+    return parser.parse_args()
 
 def ensure_dirs():
     if not os.path.exists(RESULT_DIR):
@@ -91,27 +110,40 @@ def visualize_metrics(csv_path):
         print(f"可视化失败: {e}")
 
 def main():
+    # 解析命令行参数
+    args = parse_args()
+    
+    # 打印训练配置
+    print("=" * 50)
+    print("训练配置:")
+    print(f"  Epochs: {args.epochs}")
+    print(f"  Batch Size: {args.batch_size}")
+    print(f"  Image Size: {args.img_size}")
+    print(f"  Device: {args.device}")
+    print(f"  Model: {args.model}")
+    print("=" * 50)
+    
     ensure_dirs()
     
     # 1. 创建配置文件
     yaml_path = create_yaml()
     
     # 2. 加载模型
-    print(f"加载模型: {MODEL_NAME}...")
-    model = YOLO(MODEL_NAME) 
+    print(f"加载模型: {args.model}...")
+    model = YOLO(args.model) 
     
     # 3. 开始训练
     print("开始训练...")
     results = model.train(
         data=yaml_path,
-        epochs=EPOCHS,
-        imgsz=IMG_SIZE,
-        batch=BATCH_SIZE,
+        epochs=args.epochs,
+        imgsz=args.img_size,
+        batch=args.batch_size,
         project=os.path.join(PROJECT_ROOT, 'runs'),
         name='ccpd_pose_train',
         exist_ok=True,   
         plots=True,      
-        device=0         
+        device=args.device         
     )
     
     # 4. 导出与处理结果
