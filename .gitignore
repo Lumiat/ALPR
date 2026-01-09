@@ -6,3 +6,6 @@
 !/dataset/__init__.py
 !/dataset/preprocess.py
 !/dataset/load_data.py
+
+__pycache__/
+*.pyc
