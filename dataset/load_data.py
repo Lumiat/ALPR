@@ -67,60 +67,80 @@ class LPRDataLoader(Dataset):
 
     def transform(self, img, save_name=None):
         """
-        稳健版预处理：
-        灰度 -> CLAHE增强 -> OTSU -> 基于中心区域密度的反色 -> 连通域去噪
+        清晰化预处理流程 (适配 188x48):
+        1. 灰度化
+        2. Gamma 提亮 (针对暗图)
+        3. CLAHE 光线均衡化
+        4. OTSU 二值化
+        5. 智能反色 (基于中心区域密度)
+        6. 去除小连通块 (去噪)
         """
         
-        # === 1. 灰度化 (保留你的加权公式，效果更好) ===
+        # === 1. 灰度化 ===
         if len(img.shape) == 3:
-            B, G, R = cv2.split(img.astype(np.float32))
-            gray = 0.30 * R + 0.59 * G + 0.11 * B
-            gray = gray.astype(np.uint8)
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         else:
             gray = img
 
+        # === 2. Gamma 提亮 ===
+        # 避免暗部车牌在二值化时丢失
+        # mean_brightness = np.mean(gray)
+        # if mean_brightness < 80: 
+        #     gamma = 0.6 # 提亮系数
+        #     lookUpTable = np.empty((1, 256), np.uint8)
+        #     for i in range(256):
+        #         lookUpTable[0, i] = np.clip(pow(i / 255.0, gamma) * 255.0, 0, 255)
+        #     gray = cv2.LUT(gray, lookUpTable)
+
         # === 3. CLAHE 光线均衡化 ===
+        # 增强局部对比度，让模糊的汉字笔画显现出来
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
         enhanced = clahe.apply(gray)
 
         # === 4. OTSU 二值化 ===
+        # 自动计算阈值，不使用 Adaptive Threshold 以避免笔画断裂
         _, binary = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        # === 5. 极稳健的反色逻辑 (基于面积占比) ===
-        # 核心假设：【字符面积】 < 【背景面积】
-        # 做法：截取图片中心区域（避开边框干扰），统计白色像素占比。
+        # === 5. 智能反色 (基于中心 ROI 占比) ===
+        # 目的：统一转换为【黑底白字】
         h, w = binary.shape
-        # 截取中心 ROI: 高度 20%~80%, 宽度 10%~90%
-        # 这个区域包含了大部分字符和背景，且避开了边框
-        roi = binary[int(h*0.2):int(h*0.8), int(w*0.1):int(w*0.9)]
+        # 截取中心 60% 区域，避开边框干扰
+        roi = binary[int(h*0.2):int(h*0.8), int(w*0.2):int(w*0.8)]
         
-        white_pixel_ratio = np.count_nonzero(roi == 255) / roi.size
+        # 统计白色像素占比
+        white_ratio = np.count_nonzero(roi == 255) / roi.size
         
-        # 判定：
-        # 如果 ROI 大部分 (>50%) 是白色 -> 说明背景是白的 (绿牌/白牌) -> 需要反色
-        # 如果 ROI 大部分是黑色 -> 说明背景是黑的 (蓝牌/黑牌) -> 保持不变
-        if white_pixel_ratio > 0.6:
+        # 逻辑：
+        # 如果白色占比 > 50% -> 说明背景是白的 (绿牌) -> 反色
+        # 如果白色占比 < 50% -> 说明背景是黑的 (蓝牌) -> 不变
+        if white_ratio > 0.5:
             binary = cv2.bitwise_not(binary)
 
-        # === 6. 连通域去噪 (去除雪花) ===
-        # 现在我们可以确信：背景是黑的(0)，字符和噪点是白的(255)
+        # === 6. 去除小连通块 (去噪) ===
+        # 使用 connectedComponents 物理删除噪点
         num_labels, labels_map, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
         
         clean_binary = np.zeros_like(binary)
         
         for i in range(1, num_labels): 
             area = stats[i, cv2.CC_STAT_AREA]
-            # 滤除微小噪点 (小于15像素)
-            if area > 20: 
+            
+            # 【关键参数适配】：
+            # 图像分辨率从 94x24 翻倍到 188x48，面积翻了4倍。
+            # 原来阈值是 15，现在理论上是 60。
+            # 这里设置 50，稍微保守一点，防止误删断裂的汉字笔画。
+            if area > 15: 
                 clean_binary[labels_map == i] = 255
 
-        # === 保存查看 ===
+        # === 保存查看 (建议在训练前检查这个文件夹) ===
         if save_name is not None:
             save_path = os.path.join(SAVE_PROCESS_DIR, save_name)
             cv2.imwrite(save_path, clean_binary)
 
         # === 转回网络输入格式 ===
+        # 复制为3通道
         img_3c = cv2.cvtColor(clean_binary, cv2.COLOR_GRAY2BGR)
+        # 归一化
         img_3c = img_3c.astype('float32')
         img_3c -= 127.5
         img_3c *= 0.0078125

@@ -2,13 +2,12 @@
 import os
 import sys
 
-# 保持你原有的路径处理逻辑不变
 try:
     root = os.sep + os.sep.join(__file__.split(os.sep)[1:__file__.split(os.sep).index("ALPR")+1])
     sys.path.append(root)
     os.chdir(root)
 except:
-    pass # 防止路径解析报错影响运行
+    pass 
 
 from dataset.load_data import CHARS, CHARS_DICT, LPRDataLoader
 from model.LPRNet import build_lprnet
@@ -22,6 +21,9 @@ import torch
 import time
 import matplotlib.pyplot as plt 
 from torch.optim.lr_scheduler import CosineAnnealingLR
+import swanlab
+
+swanlab.login(api_key="t069AsDNDqmzxtaFH1vaA", save=True)
 
 def sparse_tuple_for_ctc(T_length, lengths):
     input_lengths = []
@@ -35,18 +37,14 @@ def sparse_tuple_for_ctc(T_length, lengths):
 
 def get_parser():
     parser = argparse.ArgumentParser(description='parameters to train net')
-    parser.add_argument('--max_epoch', type=int, default=60, help='epoch to train the network') # 稍微增加一点epoch
-    parser.add_argument('--img_size', default=[94, 24], help='the image size')
+    parser.add_argument('--max_epoch', type=int, default=60, help='epoch to train the network')
+    parser.add_argument('--img_size', default=[188,48], help='the image size')
     
-    # 路径配置
-    parser.add_argument('--train_img_dirs', type=str, default="./dataset/ccpd_lprnet/train", help='the train images path')
-    parser.add_argument('--test_img_dirs', type=str, default="./dataset/ccpd_lprnet/val", help='the test images path')
+    parser.add_argument('--train_img_dirs', type=str, default="./dataset/ccpd_lprnet_balanced/train", help='the train images path')
+    parser.add_argument('--test_img_dirs', type=str, default="./dataset/ccpd_lprnet_balanced/val", help='the test images path')
     
     parser.add_argument('--dropout_rate', type=float, default=0.5, help='dropout rate.')
-    
-    # === 修改 1: 降低初始学习率 ===
-    parser.add_argument('--learning_rate', type=float, default=0.005, help='base value of learning rate.') 
-    
+    parser.add_argument('--learning_rate', type=float, default=0.001, help='base value of learning rate.') # 建议改回 0.001，0.005可能有点大
     parser.add_argument('--lpr_max_len', type=int, default=8, help='license plate number max length.')
     parser.add_argument('--train_batch_size', type=int, default=64, help='training batch size.')
     parser.add_argument('--test_batch_size', type=int, default=64, help='testing batch size.')
@@ -75,15 +73,24 @@ def collate_fn(batch):
         imgs.append(torch.from_numpy(img))
         labels.extend(label)
         lengths.append(length)
-    # 确保 label 类型正确
     labels = np.asarray(labels).flatten().astype(np.int64)
     return (torch.stack(imgs, 0), torch.from_numpy(labels), lengths)
 
 def train():
     args = get_parser()
 
-    T_length = 18 
-    
+    swanlab.init(
+        project="LPRNet-Training",
+        experiment_name="LPRNet_CTC_Training_FixLength",
+        config={
+            "learning_rate": args.learning_rate,
+            "max_epoch": args.max_epoch,
+            "batch_size": args.train_batch_size,
+            "img_size": args.img_size,
+            "optimizer": "Adam",
+        }
+    )
+
     epoch = 0 + args.resume_epoch
     loss_val = 0
 
@@ -92,12 +99,10 @@ def train():
     if not os.path.exists(args.result_folder):
         os.makedirs(args.result_folder)
 
-    # 初始化模型
     lprnet = build_lprnet(lpr_max_len=args.lpr_max_len, phase=args.phase_train, class_num=len(CHARS), dropout_rate=args.dropout_rate)
     device = torch.device("cuda:0" if args.cuda and torch.cuda.is_available() else "cpu")
     lprnet.to(device)
     print("Successful to build network!")
-    print(f"Class Num: {len(CHARS)} (Includes blank)")
 
     if args.pretrained_model:
         lprnet.load_state_dict(torch.load(args.pretrained_model))
@@ -120,8 +125,6 @@ def train():
         lprnet.container.apply(weights_init)
         print("initial net weights successful!")
 
-    # 计算总迭代次数
-    # 路径处理
     train_img_dirs = args.train_img_dirs.split(',')
     test_img_dirs = args.test_img_dirs.split(',')
     
@@ -131,12 +134,9 @@ def train():
     epoch_size = len(train_dataset) // args.train_batch_size
     max_iter = args.max_epoch * epoch_size
 
-    # === 修改 2: 更换为 Adam 优化器 ===
     optimizer = optim.Adam(lprnet.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-    
-    # === 修改 3: 使用 CosineAnnealing 调度器 ===
     scheduler = CosineAnnealingLR(optimizer, T_max=max_iter, eta_min=1e-6)
-
+    
     # reduction='mean'
     ctc_loss = nn.CTCLoss(blank=len(CHARS)-1, reduction='mean') 
 
@@ -145,7 +145,6 @@ def train():
     else:
         start_iter = 0
 
-    # === 用于记录可视化数据 ===
     history = {'loss': [], 'acc': [], 'iter': []}
 
     print("Start Training...")
@@ -155,18 +154,15 @@ def train():
             loss_val = 0
             epoch += 1
 
-        if iteration !=0 and iteration % args.save_interval == 0:
+        if iteration != 0 and iteration % args.save_interval == 0:
             torch.save(lprnet.state_dict(), args.save_folder + 'LPRNet_' + '_iteration_' + repr(iteration) + '.pth')
 
-        # 测试与评估
         if (iteration + 1) % args.test_interval == 0:
             acc = Greedy_Decode_Eval(lprnet, test_dataset, args, device)
-            lprnet.train() # 切换回训练模式
-            
-            # 记录数据用于画图
+            lprnet.train()
+            swanlab.log({"val/accuracy": acc}, step=iteration)
             history['acc'].append(acc)
             history['iter'].append(iteration)
-            # 保存当前模型
             torch.save(lprnet.state_dict(), args.save_folder + 'current_lprnet.pth')
 
         start_time = time.time()
@@ -177,14 +173,18 @@ def train():
             batch_iterator = iter(DataLoader(train_dataset, args.train_batch_size, shuffle=True, num_workers=args.num_workers, collate_fn=collate_fn))
             images, labels, lengths = next(batch_iterator)
 
-        input_lengths, target_lengths = sparse_tuple_for_ctc(T_length, lengths)
-        
-        # 移除旧的 adjust_learning_rate 调用
-
         images = Variable(images, requires_grad=False).to(device)
         labels = Variable(labels, requires_grad=False).to(device)
 
-        logits = lprnet(images)
+        # Forward
+        logits = lprnet(images) # Shape: [Batch, Class, Time]
+        
+        # === 核心修改：动态获取时间步长 ===
+        # 不要硬编码 36 或 18，直接问 logits 它是多少
+        current_T_length = logits.shape[2] 
+        input_lengths, target_lengths = sparse_tuple_for_ctc(current_T_length, lengths)
+        # =================================
+
         log_probs = logits.permute(2, 0, 1) 
         log_probs = log_probs.log_softmax(2).requires_grad_()
         
@@ -195,50 +195,45 @@ def train():
             continue
             
         loss.backward()
-        
-        # === 修改 4: 增加梯度裁剪，防止 Accuracy 跳水 ===
         nn.utils.clip_grad_norm_(lprnet.parameters(), max_norm=5)
-        
         optimizer.step()
-        
-        # === 修改 5: 更新学习率调度器 ===
         scheduler.step()
         
         loss_val += loss.item()
         end_time = time.time()
         
+        current_lr = optimizer.param_groups[0]['lr']
+        swanlab.log({
+            "train/loss": loss.item(),
+            "train/learning_rate": current_lr,
+            "train/epoch": epoch
+        }, step=iteration)
+        
         if iteration % 20 == 0:
-            # 获取当前 LR
-            current_lr = optimizer.param_groups[0]['lr']
             print('Epoch:' + repr(epoch) + ' || iter: ' + repr(iteration % epoch_size) + '/' + repr(epoch_size)
-                  + ' || Loss: %.4f ||' % (loss.item()) + ' Time: %.4f sec ||' % (end_time - start_time) + ' LR: %.6f' % (current_lr))
+                  + ' || Loss: %.4f ||' % (loss.item()) + ' || Time: %.4f' % (end_time - start_time) + ' || T_len: %d' % current_T_length)
             
-            # 记录 Loss
             history['loss'].append(loss.item())
 
-    # === 训练结束，保存模型与画图 ===
+    # Final logic...
     print("Final test Accuracy:")
-    Greedy_Decode_Eval(lprnet, test_dataset, args, device)
+    final_acc = Greedy_Decode_Eval(lprnet, test_dataset, args, device)
+    swanlab.log({"final/accuracy": final_acc})
     torch.save(lprnet.state_dict(), args.save_folder + 'Final_LPRNet_model.pth')
     
-    # 绘制 Loss 曲线
     plt.figure()
     plt.plot(history['loss'])
     plt.title('LPRNet Training Loss')
-    plt.xlabel('Steps (x20)')
-    plt.ylabel('CTC Loss')
     plt.savefig(os.path.join(args.result_folder, 'lprnet_loss_visualize.png'))
     
-    # 绘制 Acc 曲线
     if len(history['acc']) > 0:
         plt.figure()
         plt.plot(history['iter'], history['acc'])
         plt.title('LPRNet Validation Accuracy')
-        plt.xlabel('Iteration')
-        plt.ylabel('Accuracy')
         plt.savefig(os.path.join(args.result_folder, 'lprnet_acc_visualize.png'))
     
-    print("Training finished. Results saved.")
+    swanlab.finish()
+    print("Training finished.")
 
 def Greedy_Decode_Eval(Net, datasets, args, device):
     Net = Net.eval()
@@ -248,7 +243,6 @@ def Greedy_Decode_Eval(Net, datasets, args, device):
     Tp = 0
     Tn_1 = 0
     Tn_2 = 0
-    t1 = time.time()
     for i in range(epoch_size):
         images, labels, lengths = next(batch_iterator)
         start = 0
@@ -293,8 +287,6 @@ def Greedy_Decode_Eval(Net, datasets, args, device):
 
     Acc = Tp * 1.0 / (Tp + Tn_1 + Tn_2)
     print("[Info] Test Accuracy: {} [{}:{}:{}:{}]".format(Acc, Tp, Tn_1, Tn_2, (Tp+Tn_1+Tn_2)))
-    t2 = time.time()
-    print("[Info] Test Speed: {}s 1/{}]".format((t2 - t1) / len(datasets), len(datasets)))
     return Acc
 
 if __name__ == "__main__":

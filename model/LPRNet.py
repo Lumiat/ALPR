@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch
+import torch.nn.functional as F
 
 class small_basic_block(nn.Module):
     def __init__(self, ch_in, ch_out):
@@ -61,7 +62,7 @@ class LPRNet(nn.Module):
             x = layer(x)
             if i in [2, 6, 13, 22]: # [2, 4, 8, 11, 22]
                 keep_features.append(x)
-
+        
         global_context = list()
         for i, f in enumerate(keep_features):
             if i in [0, 1]:
@@ -73,6 +74,17 @@ class LPRNet(nn.Module):
             f = torch.div(f, f_mean)
             global_context.append(f)
 
+        target_size = global_context[0].size()[2:] # 获取 (H, W)
+        
+        for i in range(1, len(global_context)):
+            if global_context[i].size()[2:] != target_size:
+                global_context[i] = F.interpolate(
+                    global_context[i], 
+                    size=target_size, 
+                    mode='bilinear', 
+                    align_corners=True
+                )
+        
         x = torch.cat(global_context, 1)
         x = self.container(x)
         logits = torch.mean(x, dim=2)
