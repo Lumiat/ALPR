@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import swanlab
 
-swanlab.login(api_key="t069AsDNDqmzxtaFH1vaA", save=True)
+swanlab.login(api_key="你的swanlab api_key", save=True)
 
 def sparse_tuple_for_ctc(T_length, lengths):
     input_lengths = []
