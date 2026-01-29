@@ -191,27 +191,27 @@ def main():
             if img is None: continue
             h, w = img.shape[:2]
             
-            # # --- 1. YOLO 数据 (使用原图) ---
-            # dst_img_name = f"{plate_number}_{i}.jpg"
-            # dst_img_path = os.path.join(YOLO_DIR, 'images', subset_name, dst_img_name)
-            # shutil.copy(str(img_path), dst_img_path)
+            # --- 1. YOLO 数据 (使用原图) ---
+            dst_img_name = f"{plate_number}_{i}.jpg"
+            dst_img_path = os.path.join(YOLO_DIR, 'images', subset_name, dst_img_name)
+            shutil.copy(str(img_path), dst_img_path)
             
-            # # YOLO 标签
-            # dw, dh = 1.0 / w, 1.0 / h
-            # x_center = ((bbox[0] + bbox[2]) / 2.0) * dw
-            # y_center = ((bbox[1] + bbox[3]) / 2.0) * dh
-            # width = (bbox[2] - bbox[0]) * dw
-            # height = (bbox[3] - bbox[1]) * dh
+            # YOLO 标签
+            dw, dh = 1.0 / w, 1.0 / h
+            x_center = ((bbox[0] + bbox[2]) / 2.0) * dw
+            y_center = ((bbox[1] + bbox[3]) / 2.0) * dh
+            width = (bbox[2] - bbox[0]) * dw
+            height = (bbox[3] - bbox[1]) * dh
             
-            # kps_str = []
-            # for pt in landmarks:
-            #     kps_str.append(f"{pt[0]*dw:.6f} {pt[1]*dh:.6f} 2")
+            kps_str = []
+            for pt in landmarks:
+                kps_str.append(f"{pt[0]*dw:.6f} {pt[1]*dh:.6f} 2")
             
-            # label_name = dst_img_name.replace('.jpg', '.txt')
-            # dst_label_path = os.path.join(YOLO_DIR, 'labels', subset_name, label_name)
-            # with open(dst_label_path, 'w') as f:
-            #     line = f"0 {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f} {' '.join(kps_str)}"
-            #     f.write(line)
+            label_name = dst_img_name.replace('.jpg', '.txt')
+            dst_label_path = os.path.join(YOLO_DIR, 'labels', subset_name, label_name)
+            with open(dst_label_path, 'w') as f:
+                line = f"0 {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f} {' '.join(kps_str)}"
+                f.write(line)
                 
             # --- 2. LPRNet 数据 (使用高分辨率矫正图) ---
             warped_img = rectification(img, landmarks)
