@@ -25,7 +25,7 @@
 
 本项目的推理流程遵循“检测 - 矫正 - 增强 - 识别”的级联架构：
 
-![alt text](method_graph.png)
+![alt text](assets/method_graph.png)
 
 1. 车牌检测与关键点定位 (YOLOv8-Pose)
    采用改进的 YOLOv8n-pose 模型。不同于普通的目标检测，该模型引入了关键点回归分支：
@@ -36,7 +36,7 @@
    利用预测的四个关键点计算单应性矩阵，对车牌区域执行透视变换，将任意角度倾斜的车牌“拉直”为 188×48 的标准正视图。
 3. 结构化特征提取
 
-![alt text](step_process.png)
+![alt text](assets/step_process.png)
 
 这是本项目提升识别率的关键步骤。为了克服光照和底色差异，采用如下数字图像处理方案：
 
@@ -63,7 +63,7 @@
 
 该方案能够正确识别大角度倾斜、模糊以及不同类型的车牌。
 
-![alt text](image.png)
+![alt text](assets/image.png)
 
 ## 🚀 快速开始 (Quick Start)
 
